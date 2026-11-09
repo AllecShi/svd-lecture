@@ -641,7 +641,7 @@ footer p{margin:0 0 10px}
         <h4>计算与数据</h4>
         <p>页面里的所有数值只有两个来源：你这台电脑上浏览器的实时计算（实验 01、02、04、05），或写作阶段用 NumPy 核对过的常量（第 03 节与自测）。没有任何服务端，也没有 Python 在运行。实验 05 的 8 维向量与词表为手工设定的教学示例，不是训练得到的模型。</p>
         <p>公式排版：KaTeX 0.16.11（MIT 许可，已内联；数学字体从 jsDelivr 加载）。</p>
-        <p>访问统计：在线版（allecshi.github.io）使用 GoatCounter 做匿名统计，只记录访问次数、来源和各节大致停留时长，不使用 Cookie；下载到本地打开的文件不统计。</p>
+        <p>访问统计：在线版（allecshi.github.io）使用 GoatCounter 做匿名统计，只记录访问设备数、来源和各节累计停留时长，不使用 Cookie（同一设备只计一次，标记保存在你本机浏览器里）；下载到本地打开的文件不统计。</p>
       </div>
       <div>
         <h4>图片来源与授权</h4>
@@ -1470,28 +1470,59 @@ function apply(M, x, y){ return [M[0]*x + M[1]*y, M[2]*x + M[3]*y]; }
 })();
 
 /* ================= 访问统计（只在线上版本启用；本地双击打开不上报） =================
-   GoatCounter：页面访问 1 次 + 离开时每节停留时长按档位各记 1 个事件。不使用 Cookie。 */
+   GoatCounter，不使用 Cookie。按“设备”计数：设备标记存在本机 localStorage 里。
+   · 访问：同一设备只在第一次打开时记 1 次，之后再打开不再增加。
+   · 停留：每节的停留秒数在本机跨次累加；累计时长每跨过一个门槛（到达 / ≥30 秒 / ≥1 分 / ≥3 分 / ≥10 分）
+     就记 1 次，每个门槛每台设备只记一次。后台某一行的数字 = 累计停留达到该门槛的设备数。 */
 (function(){
   if(location.hostname !== 'allecshi.github.io') return;
   var ENDPOINT = 'https://allecshi.goatcounter.com/count';
+  var KEY = 'svd_stats_v1';
   var IDLE_MS = 120000;                       // 超过 2 分钟无操作就不再计时
   var SECS = [['top', '00 开头'], ['s1', '01 定义'], ['s2', '02 几何'], ['s3', '03 手算'], ['s4', '04 图像'], ['s5', '05 语义'], ['s6', '06 小结']];
-  var BUCKETS = [[10, '0–10 秒'], [30, '10–30 秒'], [60, '30 秒–1 分'], [180, '1–3 分'], [600, '3–10 分'], [Infinity, '10 分以上']];
+  var SEC_TH = [[3, '到达'], [30, '≥30 秒'], [60, '≥1 分'], [180, '≥3 分'], [600, '≥10 分']];
+  var ALL_TH = [[60, '≥1 分'], [300, '≥5 分'], [900, '≥15 分'], [1800, '≥30 分']];
+
+  // 本机存档：{seen:bool, t:{top:秒,…,all:秒}, sent:{事件名:1}}
+  var store = {seen:false, t:{}, sent:{}}, canStore = true;
+  try{
+    var raw = localStorage.getItem(KEY);
+    if(raw){ var o = JSON.parse(raw); if(o && o.t && o.sent){ store = o; } }
+  }catch(e){ canStore = false; }
+  function save(){ if(!canStore) return; try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){ canStore = false; } }
 
   // 首页跳转会丢掉原始来源，跳转页把它存进 sessionStorage，这里取回
   var origRef = null;
   try{ origRef = sessionStorage.getItem('svd_ref'); sessionStorage.removeItem('svd_ref'); }catch(e){}
-  window.goatcounter = {
-    path: function(){ try{ return decodeURIComponent(location.pathname); }catch(e){ return location.pathname; } },
-    referrer: function(r){ return origRef !== null ? origRef : r; }
-  };
+  var path = location.pathname;
+  try{ path = decodeURIComponent(location.pathname); }catch(e){}
+
+  // 关掉自动计数，由下面按设备决定是否上报
+  window.goatcounter = {no_onload:true};
+  var queue = [], ready = false;
+  function send(v){
+    if(ready && window.goatcounter.count){ try{ window.goatcounter.count(v); }catch(e){} }
+    else queue.push(v);
+  }
   var gs = document.createElement('script');
   gs.async = true; gs.src = 'https://gc.zgo.at/count.js';
   gs.setAttribute('data-goatcounter', ENDPOINT);
+  gs.onload = function(){ ready = true; var q = queue; queue = []; q.forEach(send); };
   document.head.appendChild(gs);
 
+  // 无法使用本机存储（隐私模式等）时退回“每次打开都算”，否则同一设备只算第一次
+  if(!store.seen || !canStore){
+    store.seen = true; save();
+    send({path:path, title:document.title, referrer:(origRef !== null ? origRef : document.referrer)});
+  }
+
+  function mark(name){
+    if(store.sent[name]) return;
+    store.sent[name] = 1; save();
+    send({path:name, title:name, event:true});
+  }
   var els = SECS.map(function(s){ return document.getElementById(s[0]); });
-  var secs = SECS.map(function(){ return 0; }), total = 0, lastInput = Date.now(), sent = false;
+  var lastInput = Date.now();
   function poke(){ lastInput = Date.now(); }
   ['scroll', 'pointerdown', 'pointermove', 'keydown', 'input', 'touchstart', 'wheel'].forEach(function(ev){
     window.addEventListener(ev, poke, {passive:true, capture:true});
@@ -1505,26 +1536,22 @@ function apply(M, x, y){ return [M[0]*x + M[1]*y, M[2]*x + M[3]*y]; }
     });
     return hit;
   }
+  var tick = 0;
   setInterval(function(){
-    if(sent || document.visibilityState !== 'visible' || Date.now() - lastInput > IDLE_MS) return;
-    total++;
+    if(document.visibilityState !== 'visible' || Date.now() - lastInput > IDLE_MS) return;
+    var t = store.t;
+    t.all = (t.all || 0) + 1;
+    ALL_TH.forEach(function(th){ if(t.all >= th[0]) mark('累计 · 全页 · ' + th[1]); });
     var i = activeIndex();
-    if(i >= 0) secs[i]++;
+    if(i >= 0){
+      var id = SECS[i][0];
+      t[id] = (t[id] || 0) + 1;
+      SEC_TH.forEach(function(th){ if(t[id] >= th[0]) mark('累计 · ' + SECS[i][1] + ' · ' + th[1]); });
+    }
+    if(++tick % 5 === 0) save();
   }, 1000);
-  function bucket(s){ for(var k = 0; k < BUCKETS.length; k++) if(s < BUCKETS[k][0]) return BUCKETS[k][1]; }
-  // 每次打开只在第一次离开（切走、锁屏、关闭）时上报一次，避免同一人落进两个档位
-  function flush(){
-    if(sent || !window.goatcounter || !window.goatcounter.count) return;
-    sent = true;
-    var ev = [];
-    secs.forEach(function(s, i){ if(s >= 1) ev.push('停留 · ' + SECS[i][1] + ' · ' + bucket(s)); });
-    if(total >= 1) ev.push('停留 · 全页合计 · ' + bucket(total));
-    ev.forEach(function(p){
-      try{ window.goatcounter.count({path:p, title:p, event:true}); }catch(e){}
-    });
-  }
-  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden') flush(); });
-  window.addEventListener('pagehide', flush);
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden') save(); });
+  window.addEventListener('pagehide', save);
 })();
 
 })();
