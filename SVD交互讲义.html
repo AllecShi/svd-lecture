@@ -641,6 +641,7 @@ footer p{margin:0 0 10px}
         <h4>计算与数据</h4>
         <p>页面里的所有数值只有两个来源：你这台电脑上浏览器的实时计算（实验 01、02、04、05），或写作阶段用 NumPy 核对过的常量（第 03 节与自测）。没有任何服务端，也没有 Python 在运行。实验 05 的 8 维向量与词表为手工设定的教学示例，不是训练得到的模型。</p>
         <p>公式排版：KaTeX 0.16.11（MIT 许可，已内联；数学字体从 jsDelivr 加载）。</p>
+        <p>访问统计：在线版（allecshi.github.io）使用 GoatCounter 做匿名统计，只记录访问次数、来源和各节大致停留时长，不使用 Cookie；下载到本地打开的文件不统计。</p>
       </div>
       <div>
         <h4>图片来源与授权</h4>
@@ -1466,6 +1467,64 @@ function apply(M, x, y){ return [M[0]*x + M[1]*y, M[2]*x + M[3]*y]; }
       });
     });
   });
+})();
+
+/* ================= 访问统计（只在线上版本启用；本地双击打开不上报） =================
+   GoatCounter：页面访问 1 次 + 离开时每节停留时长按档位各记 1 个事件。不使用 Cookie。 */
+(function(){
+  if(location.hostname !== 'allecshi.github.io') return;
+  var ENDPOINT = 'https://allecshi.goatcounter.com/count';
+  var IDLE_MS = 120000;                       // 超过 2 分钟无操作就不再计时
+  var SECS = [['top', '00 开头'], ['s1', '01 定义'], ['s2', '02 几何'], ['s3', '03 手算'], ['s4', '04 图像'], ['s5', '05 语义'], ['s6', '06 小结']];
+  var BUCKETS = [[10, '0–10 秒'], [30, '10–30 秒'], [60, '30 秒–1 分'], [180, '1–3 分'], [600, '3–10 分'], [Infinity, '10 分以上']];
+
+  // 首页跳转会丢掉原始来源，跳转页把它存进 sessionStorage，这里取回
+  var origRef = null;
+  try{ origRef = sessionStorage.getItem('svd_ref'); sessionStorage.removeItem('svd_ref'); }catch(e){}
+  window.goatcounter = {
+    path: function(){ try{ return decodeURIComponent(location.pathname); }catch(e){ return location.pathname; } },
+    referrer: function(r){ return origRef !== null ? origRef : r; }
+  };
+  var gs = document.createElement('script');
+  gs.async = true; gs.src = 'https://gc.zgo.at/count.js';
+  gs.setAttribute('data-goatcounter', ENDPOINT);
+  document.head.appendChild(gs);
+
+  var els = SECS.map(function(s){ return document.getElementById(s[0]); });
+  var secs = SECS.map(function(){ return 0; }), total = 0, lastInput = Date.now(), sent = false;
+  function poke(){ lastInput = Date.now(); }
+  ['scroll', 'pointerdown', 'pointermove', 'keydown', 'input', 'touchstart', 'wheel'].forEach(function(ev){
+    window.addEventListener(ev, poke, {passive:true, capture:true});
+  });
+  function activeIndex(){
+    var y = window.innerHeight*0.45, hit = -1;
+    els.forEach(function(el, i){
+      if(!el) return;
+      var r = el.getBoundingClientRect();
+      if(r.top <= y && r.bottom > y) hit = i;
+    });
+    return hit;
+  }
+  setInterval(function(){
+    if(sent || document.visibilityState !== 'visible' || Date.now() - lastInput > IDLE_MS) return;
+    total++;
+    var i = activeIndex();
+    if(i >= 0) secs[i]++;
+  }, 1000);
+  function bucket(s){ for(var k = 0; k < BUCKETS.length; k++) if(s < BUCKETS[k][0]) return BUCKETS[k][1]; }
+  // 每次打开只在第一次离开（切走、锁屏、关闭）时上报一次，避免同一人落进两个档位
+  function flush(){
+    if(sent || !window.goatcounter || !window.goatcounter.count) return;
+    sent = true;
+    var ev = [];
+    secs.forEach(function(s, i){ if(s >= 1) ev.push('停留 · ' + SECS[i][1] + ' · ' + bucket(s)); });
+    if(total >= 1) ev.push('停留 · 全页合计 · ' + bucket(total));
+    ev.forEach(function(p){
+      try{ window.goatcounter.count({path:p, title:p, event:true}); }catch(e){}
+    });
+  }
+  document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', flush);
 })();
 
 })();
